@@ -6,6 +6,7 @@ networkx==3.1
 numpy==1.25.0
 seaborn==0.13.1
 setuptools==67.8.0
+tensoboard ==2.12.1
 torch_geometric==2.3.1
 --extra-index-url https://download.pytorch.org/whl/cu118 
 torch==2.0.1+cu118
