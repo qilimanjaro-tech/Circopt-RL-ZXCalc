@@ -37,14 +37,13 @@ class AgentGNN(nn.Module):
         super().__init__()
 
         self.device = device
-        self.obs_shape = envs.envs[0].shape
+        self.obs_shape = 3000
         self.bin_required = int(np.ceil(np.log2(self.obs_shape)))
-        self.qubits = envs.envs[0].qubits
 
-        c_in_p = 16
-        c_in_v = 11
-        edge_dim = 6
-        edge_dim_v = 3
+        c_in_p = 17
+        c_in_v = 12
+        edge_dim = 7
+        edge_dim_v = 2
         self.global_attention_critic = geom_nn.GlobalAttention(
             gate_nn=nn.Sequential(
                 nn.Linear(c_hidden, c_hidden),

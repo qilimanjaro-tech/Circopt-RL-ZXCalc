@@ -12,6 +12,7 @@ import pyzx as zx
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import multiprocessing as mp
 
 from distutils.util import strtobool
 from torch.utils.tensorboard import SummaryWriter
@@ -100,6 +101,7 @@ def make_env(gym_id, seed, idx, capture_video, run_name, qubits, depth):
 
 
 if __name__ == "__main__":
+    mp.set_start_method('spawn') ##set multiprocessing spawn for CUDA multiprocessing
     args = parse_args()
     run_name = f"{args.gym_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
     writer = SummaryWriter(f"runs/{run_name}")
@@ -110,7 +112,7 @@ if __name__ == "__main__":
     
     #Training size
     qubits = 5
-    depth = 20
+    depth = 70
     
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -118,9 +120,9 @@ if __name__ == "__main__":
     torch.backends.cudnn.deterministic = args.torch_deterministic
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
-    envs = gym.vector.SyncVectorEnv(
-        [make_env(args.gym_id, args.seed + i, i, args.capture_video, run_name, qubits, depth) for i in range(args.num_envs)]
-    )
+    envs = gym.vector.AsyncVectorEnv(
+        [make_env(args.gym_id, args.seed + i, i, args.capture_video, run_name, qubits, depth) for i in range(args.num_envs)],
+    shared_memory=False)
     agent = AgentGNN(envs, device).to(device)
 
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
@@ -133,9 +135,11 @@ if __name__ == "__main__":
 
     
     global_step = 0
+    start_time = time.time()
 
     obs0, reset_info = envs.reset()
-
+    end = time.time()
+    print(end-start_time)
     new_value_data = []
     new_policy_data = []
     for item in reset_info["graph_obs"]:
@@ -165,8 +169,8 @@ if __name__ == "__main__":
     wins_vs_pyzx = []
     for update in range(1, num_updates + 1):
         # Annealing the rate if instructed to do so.
-        if update % 50 == 1:
-            torch.save(agent.state_dict(), "state_dict_" + str(global_step) + "model5x70_twoqubits_new.pt")
+        """if update % 50 == 1:
+            torch.save(agent.state_dict(), "state_dict_" + str(global_step) + "model5x70_twoqubits_new.pt")"""
         if args.anneal_lr:
             frac = max(1.0 / 100, 1.0 - (update - 1.0) / (num_updates * 5.0 / 6))
             lrnow = frac * args.learning_rate
@@ -183,14 +187,16 @@ if __name__ == "__main__":
             value_data.extend(new_value_data)
             policy_data.extend(new_policy_data)
             dones[step] = next_done
-
-            with torch.no_grad():
-                action, logprob, _, value, logits, action_ids = agent.get_action_and_value(next_obs_graph, device=device)
-                values[step] = value.flatten()
-            actions[step] = action
-            logprobs[step] = logprob
-            
-            next_obs, reward, done, deprecated, info = envs.step(action_ids.cpu().numpy())
+            try:
+                with torch.no_grad():
+                    action, logprob, _, value, logits, action_ids = agent.get_action_and_value(next_obs_graph, device=device)
+                    values[step] = value.flatten()
+                actions[step] = action
+                logprobs[step] = logprob
+                
+                next_obs, reward, done, deprecated, info = envs.step(action_ids.cpu().numpy())
+            except TypeError as e:
+                print(f"Error: {e}")
             rewards[step] = torch.tensor(reward).to(device).view(-1)
 
             next_done = torch.Tensor(done).to(device)
@@ -288,7 +294,6 @@ if __name__ == "__main__":
 
                 _, newlogprob, entropy, newvalue, logits, _ = agent.get_action_and_value(
                     (policies_batch, values_batch),
-                    None,
                     b_actions.long()[mb_inds].T, device=device
                 )  # training begins, here we pass minibatch action so the agent doesnt sample a new action
                 logratio = newlogprob - b_logprobs[mb_inds]  # logratio = log(newprob/oldprob)
@@ -439,4 +444,4 @@ if __name__ == "__main__":
     envs.close()
     writer.close()
 
-torch.save(agent.state_dict(), "state_dict_model5x70_twoqubits_new.pt")
+#torch.save(agent.state_dict(), "state_dict_model5x70_twoqubits_new.pt")

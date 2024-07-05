@@ -6,6 +6,7 @@ import time
 from fractions import Fraction
 from typing import Callable, Dict, List, Optional, Set, Tuple, Union
 
+import matplotlib.pyplot as plt
 import gym
 import networkx as nx
 import numpy as np
@@ -28,17 +29,23 @@ def handler(signum, frame):
     raise Exception("end of time")
 
 class ZXEnv(gym.Env):
-    def __init__(self, qubits, depth):
+    def __init__(self, qubits, depth, env_id):
         self.device = "cuda"
         self.clifford = False
         self.qubits, self.depth = qubits, depth
         self.shape = 3000
         self.gate_type = "twoqubits"
 
-        self.max_episode_len = 75
+        self.env_id = env_id
+        self.max_episode_len = 50
         self.cumulative_reward_episodes = 0
         self.win_episodes = 0
         self.max_compression = 20
+        self.action={}
+        self.number_node_features_policy = 17
+        self.number_node_features_value = 12
+        self.number_edge_features_policy = 7
+        self.number_edge_features_value = 2
 
         # Unused variables but required for gym
         self.action_space = Discrete(1)
@@ -87,7 +94,7 @@ class ZXEnv(gym.Env):
         done = False
 
         if act_type == "LC":
-            
+            edge_table, rem_vert, rem_edge,_ = self.lcomp(act_node1)
             self.apply_rule(*self.lcomp(act_node1))
             action_id = 1
             node = [act_node1]
@@ -106,8 +113,10 @@ class ZXEnv(gym.Env):
             
             pv_type = self.pivot_info_dict[(act_node1, act_node2)][-1]
             if pv_type == 0:
+                edge_table, rem_vert, rem_edge,_ = self.pivot(act_node1,act_node2)
                 self.apply_rule(*self.pivot(act_node1, act_node2))
             else:
+                #act_node2 is the node connected to a boundary and the node that needs to be put phase 0 for the policy&value obs
                 self.apply_rule(*self.pivot_gadget(act_node1, act_node2))
             action_id = 2
             node = [act_node1, act_node2]
@@ -216,11 +225,13 @@ class ZXEnv(gym.Env):
                                      self.best_action_stats["id"],
                                      self.best_action_stats["gf"]],
                     "depth": self.final_circuit.depth(),
-                    "initial_depth": self.initial_depth
+                    "initial_depth": self.initial_depth,
+                    "env_id": self.env_id
                 },
             )
 
         self.current_gates = new_gates
+        self.action = {act_type: node}
 
         return (
             self.graph,
@@ -246,61 +257,38 @@ class ZXEnv(gym.Env):
         self.swap_cost = 0
         self.episode_stats = {"pivb": 0 , "pivg":0, "piv":0, "lc": 0, "id":0, "gf":0}
         self.best_action_stats = {"pivb": 0 , "pivg":0, "piv":0 , "lc": 0, "id":0, "gf":0}
-        valid_circuit = False
+        self.count = 0
+    
+        c = zx.generate.cquere_circuit(qubits=self.qubits,depth=self.depth, p_rz = 0.32, p_ry=0.36, p_rzz=0.29, 
+                                       p_rx = 0.03, p_trz = 0.21, p_try = 0.065, p_trx = 0.5).to_basic_gates()
+        rand_graph = c.to_graph()
+        self.no_opt_stats = self.get_data(c)
+        self.initial_depth = c.depth()
         
-        # circuit generation
-        while not valid_circuit:
-            
-            g = zx.generate.cliffordT(
-               self.qubits, self.depth, p_t=0.17, p_s=0.24, p_hsh=0.25, 
-            )
-            c = zx.Circuit.from_graph(g)
-            self.no_opt_stats = self.get_data(c.to_basic_gates())
-            self.initial_depth = c.to_basic_gates().depth()
-            self.rand_circuit = zx.optimize.basic_optimization(c.split_phase_gates())
-            self.initial_stats = self.get_data(self.rand_circuit)
-            self.graph = self.rand_circuit.to_graph()
-            
-            signal.signal(signal.SIGALRM, handler)
-            signal.alarm(10)
-            try:
-                zx.simplify.teleport_reduce(self.graph)
-            except: 
-                print('Teleport reduce error')
-                continue
-            
-            signal.alarm(0)
-            
-            basic_circ = zx.optimize.basic_optimization(zx.Circuit.from_graph(self.graph.copy()).split_phase_gates())
-            self.basic_opt_data = self.get_data(basic_circ.to_basic_gates())
-            self.to_graph_like()
-            self.graph = self.graph.copy()  # This relabels the nodes such that there are no empty spaces
+        self.initial_stats = self.get_data(c)
+        graph = c.to_graph()
+        
+        basic_circ = zx.optimize.basic_optimization(zx.Circuit.from_graph(graph.copy()).split_phase_gates())
+        circuit_data = self.get_data(basic_circ.to_basic_gates())
+        self.graph = basic_circ.to_graph()
+        self.to_graph_like()
+        self.graph = self.graph.copy()  # This relabels the nodes such that there are no empty spaces
+        self.pyzx_data = self.obtain_gates_pyzx(graph.copy())
+        self.pyzx_gates = self.pyzx_data[self.gate_type]
+        
+        self.pivot_info_dict = self.match_pivot_parallel() | self.match_pivot_boundary() | self.match_pivot_gadget()
+        self.gadget_info_dict, self.gadgets = self.match_phase_gadgets()
+        self.gadget_fusion_ids = list(self.gadget_info_dict)
             
             
-            self.pivot_info_dict = self.match_pivot_parallel() | self.match_pivot_boundary() | self.match_pivot_gadget()
-            self.gadget_info_dict, self.gadgets = self.match_phase_gadgets()
-            self.gadget_fusion_ids = list(self.gadget_info_dict)
-            actions_available = len(self.match_lcomp()) + len(self.pivot_info_dict.keys()) + len(self.match_ids())
-            if actions_available == 0:
-                print("Generating new circuit")
-            else:
-                valid_circuit = True
-            
-            full_reduce_start = time.time()
-            self.pyzx_data = self.obtain_gates_pyzx(g.copy())
-            full_reduce_end = time.time()
+        self.basic_opt_data = circuit_data
+        self.current_gates = circuit_data[self.gate_type]
+        self.initial_stats = circuit_data
+        self.final_circuit = basic_circ
+        self.min_gates = circuit_data[self.gate_type]
+        self.total_single_qubit_gates = circuit_data["gates"]
 
-            self.pyzx_gates = self.pyzx_data[self.gate_type]
-            circuit= zx.extract_circuit(self.graph.copy(), up_to_perm=True)
-            circuit = circuit.to_basic_gates()
-            circuit = zx.basic_optimization(circuit).to_basic_gates()
-            circuit_data = self.get_data(circuit)
-            self.current_gates = circuit_data[self.gate_type]
-            self.initial_stats = circuit_data
-            self.final_circuit = circuit
-            self.min_gates = circuit_data[self.gate_type]
-
-        return self.graph, {"graph_obs": [self.policy_obs(), self.value_obs()], "full_reduce_time": full_reduce_end-full_reduce_start}
+        return self.graph, {"graph_obs": [self.policy_obs(), self.value_obs()]}
 
     def to_graph_like(self):
         """Transforms a ZX-diagram into graph-like"""
@@ -316,6 +304,12 @@ class ZXEnv(gym.Env):
             self.graph.remove_isolated_vertices()
 
     def policy_obs(self):
+        
+        """
+        graph_0 = zx.draw_matplotlib(self.graph, labels=True, figsize=(10,6))
+        graph_0.savefig("graph"+str(self.count)+".png")
+        self.count = self.count + 1  # Save the current figure
+        """
         """Enters the graph in format ZX"""
         piv_nodes = self.pivot_info_dict.keys()
         lcomp_nodes = self.match_lcomp()
@@ -327,7 +321,7 @@ class ZXEnv(gym.Env):
         graph_nx.add_nodes_from(v_list)
         graph_nx.add_edges_from(e_list)
 
-        # make the graph directed to duplicate edges
+        # make the graph directed to duplicate edges, the GNN takes into account information of both directions.
         graph_nx = graph_nx.to_directed()
         # relabel 0->N nodes
         mapping = {node: i for i, node in enumerate(graph_nx.nodes)}
@@ -347,13 +341,12 @@ class ZXEnv(gym.Env):
             neighbors_outputs.append(list(self.graph.neighbors(vertice))[0])
 
         node_features = []
-        number_node_features = 16
         for node in sorted(p_graph.nodes):
             real_node = identifier[node]
 
             # Features: One-Hot phase, Frontier In, Frontier 0ut, Gadget, LC Node, PV Node,
             # STOP Node, ID Node, GadgetF, NOT INCLUDED Extraction Cost
-            node_feature = [0.0 for _ in range(number_node_features)]
+            node_feature = [0.0 for _ in range(self.number_node_features_policy)]
 
             # Frontier Node
             if real_node in self.graph.inputs():
@@ -363,9 +356,12 @@ class ZXEnv(gym.Env):
             else:
                 # One-Hot phase
                 oh_phase_idx = int(self.graph.phase(real_node) / (0.25))
-                node_feature[oh_phase_idx] = 1.0
+                if oh_phase_idx not in range(1,8) and self.graph.phase(real_node) != 0:
+                    node_feature[16] = 1.0
+                else:
+                    node_feature[oh_phase_idx] = 1.0
 
-                if self.graph.neighbors(real_node) == 1:  # Phase Gadget
+                if len(self.graph.neighbors(real_node)) == 1:  # Phase Gadget
                     node_feature[10] = 1.0
 
             # Extraction cost
@@ -378,47 +374,49 @@ class ZXEnv(gym.Env):
         current_node = n_nodes
         edge_list = list(p_graph.edges)
         edge_features = []
-        edge_feature_number = 6
         for edge in edge_list:
             # True: 1, False: 0. Features: Graph edge, NOT INCLUDED brings to frontier, NOT INCLUDED is brought by,
             # Removing Node-LC,Removing Node-PV, Removing Node-ID, Gadget fusion, Between Action
             node1, node2 = identifier[edge[0]], identifier[edge[1]]
-            edge_feature = [0.0 for _ in range(edge_feature_number)]
+            edge_feature = [0.0 for _ in range(self.number_edge_features_policy)]
 
             # Graph edge
-            edge_feature[0] = 1.0
+            if self.graph.edge_type(edge) == EdgeType.HADAMARD:
+                edge_feature[0] = 1.0
+            elif self.graph.edge_type(edge) == EdgeType.SIMPLE:
+                edge_feature[1] = 1.0
             edge_features.append(edge_feature)
 
         # Add action nodes from lcomp and pivoting lists and connect them
         for node in lcomp_nodes:
-            node_feature = [0 for _ in range(number_node_features)]
+            node_feature = [0 for _ in range(self.number_node_features_policy)]
             node_feature[11] = 1.0
             node_features.append(node_feature)
             identifier.append(node * self.shape + node)
             # Connect the node to the rest of the graph
             graph_node = mapping[node]
             edge_list.append((mapping[node], current_node))
-            edge_feature = [0 for _ in range(edge_feature_number)]
-            edge_feature[1] = 1.0
+            edge_feature = [0 for _ in range(self.number_edge_features_policy)]
+            edge_feature[2] = 1.0
             edge_features.append(edge_feature)
 
             current_node += 1
 
         for node in iden_nodes:
-            node_feature = [0 for _ in range(number_node_features)]
+            node_feature = [0 for _ in range(self.number_node_features_policy)]
             node_feature[14] = 1.0
             node_features.append(node_feature)
             identifier.append(self.shape**2 + node)
             graph_node = mapping[node]
             edge_list.append((mapping[node], current_node))
-            edge_feature = [0 for _ in range(edge_feature_number)]
+            edge_feature = [0 for _ in range(self.number_edge_features_policy)]
             edge_feature[3] = 1.0
             edge_features.append(edge_feature)
 
             current_node += 1
 
         for node1, node2 in piv_nodes:
-            node_feature = [0 for _ in range(number_node_features)]
+            node_feature = [0 for _ in range(self.number_node_features_policy)]
             node_feature[12] = 1.0
             node_features.append(node_feature)
             identifier.append(node1 * self.shape + node2)
@@ -426,8 +424,8 @@ class ZXEnv(gym.Env):
             graph_node2 = mapping[node2]
             edge_list.append((graph_node1, current_node))
             edge_list.append((graph_node2, current_node))
-            edge_feature = [0 for _ in range(edge_feature_number)]
-            edge_feature[2] = 1.0
+            edge_feature = [0 for _ in range(self.number_edge_features_policy)]
+            edge_feature[4] = 1.0
             edge_features.append(edge_feature)
             edge_features.append(edge_feature)
 
@@ -435,7 +433,7 @@ class ZXEnv(gym.Env):
 
         for idx, gadgetf in enumerate(self.gadget_fusion_ids):
 
-            node_feature = [0 for _ in range(number_node_features)]
+            node_feature = [0 for _ in range(self.number_node_features_policy)]
             node_feature[15] = 1.0
             node_features.append(node_feature)
             identifier.append(-(idx + 2))
@@ -443,15 +441,15 @@ class ZXEnv(gym.Env):
             for node in gadgetf:
                 graph_node = mapping[node]
                 edge_list.append((graph_node, current_node))
-                edge_feature = [0 for _ in range(edge_feature_number)]
-                edge_feature[4] = 1.0
+                edge_feature = [0 for _ in range(self.number_edge_features_policy)]
+                edge_feature[5] = 1.0
                 edge_features.append(edge_feature)
 
             current_node += 1
 
         # Add action for STOP node
 
-        node_feature = [0 for _ in range(number_node_features)]
+        node_feature = [0 for _ in range(self.number_node_features_policy)]
         node_feature[13] = 1.0
         node_features.append(node_feature)
         identifier.append(self.shape * (self.shape + 1) + 1)
@@ -459,15 +457,16 @@ class ZXEnv(gym.Env):
         for j in range(n_nodes, current_node):
             # Other actions feed Stop Node
             edge_list.append((j, current_node))
-            edge_feature = [0 for _ in range(edge_feature_number)]
-            edge_feature[5] = 1.0
+            edge_feature = [0 for _ in range(self.number_edge_features_policy)]
+            edge_feature[6] = 1.0
             edge_features.append(edge_feature)
 
+        self.policy_obs_dict = {"node features": node_features,"edge_list":edge_list, "edge_features":edge_features }
         # Create tensor objects
-        x = torch.tensor(node_features).view(-1, number_node_features)
+        x = torch.tensor(node_features).view(-1, self.number_node_features_policy)
         x = x.type(torch.float32)
         edge_index = torch.tensor(edge_list).t().contiguous()
-        edge_features = torch.tensor(edge_features).view(-1, edge_feature_number)
+        edge_features = torch.tensor(edge_features).view(-1, self.number_edge_features_policy)
         identifier[:n_nodes] = [-1] * n_nodes
         identifier = torch.tensor(identifier)
         return (
@@ -504,7 +503,7 @@ class ZXEnv(gym.Env):
         for node in sorted(V.nodes):
             real_node = identifier[node]
             # Features: Onehot PHASE, Frontier In, Frontier 0ut, Phase Gadget, NOT INCLUDED EXTRACTION COST
-            node_feature = [0.0 for _ in range(11)]
+            node_feature = [0.0 for _ in range(self.number_node_features_value)]
 
             # Frontier Node
             if real_node in self.graph.inputs():
@@ -513,9 +512,12 @@ class ZXEnv(gym.Env):
                 node_feature[9] = 1.0
             else:
                 oh_phase_idx = int(self.graph.phase(real_node) / (0.25))
-                node_feature[oh_phase_idx] = 1.0
-                if self.graph.neighbors(real_node) == 1:  # Phase Gadget
+                if oh_phase_idx not in range(1,8) and self.graph.phase(real_node) != 0:
                     node_feature[10] = 1.0
+                else:
+                    node_feature[oh_phase_idx] = 1.0
+                if len(self.graph.neighbors(real_node)) == 1:  # Phase Gadget
+                    node_feature[11] = 1.0
 
             node_features.append(node_feature)
 
@@ -525,15 +527,23 @@ class ZXEnv(gym.Env):
             edge_list.append((node2, node1))
 
         edge_features = []
-        for node1, node2 in edge_list:
+        for edge in edge_list:
             # Edge in graph, pull node, pushed node.
-            edge_feature = [1.0, 0.0, 0.0]
+            # Graph edge
+            edge_feature = [0 for _ in range(self.number_edge_features_value)]
+            if self.graph.edge_type(edge) == EdgeType.HADAMARD:
+                edge_feature[0] = 1.0
+            elif self.graph.edge_type(edge) == EdgeType.SIMPLE:
+                edge_feature[1] = 1.0
+           
             edge_features.append(edge_feature)
         
+        self.value_obs_dict = {"node features": node_features,"edge_list":edge_list, "edge_features":edge_features}
+        #Create tensor objects
         edge_index_value = torch.tensor(edge_list).t().contiguous()
-        x_value = torch.tensor(node_features).view(-1, 11)
+        x_value = torch.tensor(node_features).view(-1, self.number_node_features_value)
         x_value = x_value.type(torch.float32)
-        edge_features = torch.tensor(edge_features).view(-1, 3)
+        edge_features = torch.tensor(edge_features).view(-1, self.number_edge_features_value)
         return (x_value.to(self.device), edge_index_value.to(self.device), edge_features.to(self.device))
     
     MatchLcompType = Tuple[VT,Tuple[VT,...]]
@@ -559,7 +569,7 @@ class ZXEnv(gym.Env):
         """
         if vertexf is not None: candidates = set([v for v in self.graph.vertices() if vertexf(v)])
         else: candidates = self.graph.vertex_set()
-        
+        candidates_left = []
         phases = self.graph.phases()
         types = self.graph.types()
         
@@ -568,16 +578,28 @@ class ZXEnv(gym.Env):
         while (num == -1 or i < num) and len(candidates) > 0:
             v = candidates.pop()
             
-            if types[v] != VertexType.Z: continue
-            if phases[v] not in (Fraction(1,2), Fraction(3,2)): continue
-            if self.graph.is_ground(v): continue
+            if types[v] != VertexType.Z:
+                candidates_left.append(v)
+                continue
+            if phases[v] not in (Fraction(1,2), Fraction(3,2)): 
+                candidates_left.append(v)
+                continue
+            if self.graph.is_ground(v): #input/output spider
+                candidates_left.append(v)
+                continue
 
             if check_edge_types and not (
                 all(self.graph.edge_type(e) == EdgeType.HADAMARD for e in self.graph.incident_edges(v))
-                ): continue
+                ): #not all edges are hadamard, i.e. this is a boundary spider. 
+                #This would be suitable for pivot boundary. It can happen that a spider is boundary but connected through a Hadamard edge.
+                candidates_left.append(v) 
+                continue
 
             vn = list(self.graph.neighbors(v))
-            if any(types[n] != VertexType.Z for n in vn): continue
+            if any(types[n] != VertexType.Z for n in vn):#if any of the types of the neighbour are not Z spiders
+                #this is a boundary spider.
+                candidates_left.append(v)
+                continue
             
             #m.append((v,tuple(vn)))
             if len(self.graph.neighbors(v)) ==1:  #Phase gadget of pi/2 can not be selected
@@ -932,8 +954,15 @@ class ZXEnv(gym.Env):
         if self.graph.phase_tracking:
             self.graph.unfuse_vertex(vp, v)
 
-        self.graph.add_edges(edge_list, EdgeType.HADAMARD)
-        return
+        self.graph.add_edges(edge_list, EdgeType.HADAMARD) 
+        #graph_0 = zx.draw_matplotlib(self.graph, labels=True, figsize=(10,6))
+        #graph_0.savefig("graph_gadget"+str(self.count)+".png")
+        
+        
+        self.policy_features = self.create_policy_features_gadget([vp,v0], edge_list)
+        self.value_features = self.create_value_features_gadget([vp,v0], edge_list)
+        #we need to update the policy and value feature of VERTEX V (now it has phase 0)
+        return 
 
     MatchGadgetType = Tuple[VT, int, List[VT], Dict[VT, VT]]
 
@@ -1079,12 +1108,15 @@ class ZXEnv(gym.Env):
         types = self.graph.types()
         phases = self.graph.phases()
         m = []
+        matches_left = []
         while len(candidates) > 0:
             v = candidates.pop()
             if phases[v] != 0 or not zx.utils.vertex_is_zx(types[v]) or self.graph.is_ground(v):
+                matches_left.append(v)
                 continue
             neigh = self.graph.neighbors(v)
             if len(neigh) != 2:
+                matches_left.append(v)
                 continue
             v0, v1 = neigh
             if (
@@ -1094,6 +1126,7 @@ class ZXEnv(gym.Env):
                 and types[v0] == zx.VertexType.BOUNDARY
             ):
                 # Do not put ground spiders on the boundary
+                matches_left.append(v)
                 continue
             m.append(v)
         return m
@@ -1145,3 +1178,92 @@ class ZXEnv(gym.Env):
         circuit = zx.basic_optimization(circuit).to_basic_gates()
         self.pyzx_swap_cost = 0
         return self.get_data(circuit)
+    
+    def create_policy_features_gadget(self, node_list, edge_list):
+        """Code to create new nodes and edges features for policy and value obs"""
+        edge_features, node_features = [], []
+        for edge in edge_list:
+            edge_feature = [0.0 for _ in range(7)]
+            if self.graph.edge_type(edge) == EdgeType.HADAMARD:
+                edge_feature[0] = 1.0
+            elif self.graph.edge_type(edge) == EdgeType.SIMPLE:
+                edge_feature[1] = 1.0
+            edge_features.append(edge_feature)
+
+        for v in node_list:
+            node_feature = [0.0 for _ in range(16)]
+            # One-Hot phase
+            oh_phase_idx = int(self.graph.phase(v) / (0.25))
+            node_feature[oh_phase_idx] = 1.0
+            if len(self.graph.neighbors(v)) == 1:  # Phase Gadget
+                node_feature[10] = 1.0
+            node_features.append(node_feature)
+
+        return  {"node features": node_features ,"edge_list": edge_list, "edge_features": edge_features}
+    def update_policy(self, act_type, node_list: List = [], edge_list: List[(Tuple)] = []):
+        
+        if node_list:
+            node_features = self.policy_obs_dict["node features"]
+            if act_type == "PVG":
+                n_nodes = 30
+                x = torch.tensor(node_features).view(-1, self.number_edge_features_policy)
+                x = x.type(torch.float32)
+                identifier[:n_nodes] = [-1] * n_nodes
+            identifier = torch.tensor(identifier)
+
+
+        if edges_list:
+            edges_list = self.policy_obs_dict["edge list"]
+
+
+
+        
+            edge_index = torch.tensor(edge_list).t().contiguous()
+            edge_features = torch.tensor(edge_features).view(-1, self.number_edge_features_policy)
+        
+        if not (node_list and edge_list): #just take the same old policy 
+            return None
+        
+        return (
+            x.to(self.device),
+            edge_index.to(self.device),
+            edge_features.to(self.device),
+            identifier.to(self.device),
+        )
+
+
+                           
+    
+    def create_value_features_gadget(self, node_list, edge_list):
+        "This is only to create the value data for the "
+        edge_features, node_features = [], []
+        for node in node_list:
+            # Features: Onehot PHASE, Frontier In, Frontier 0ut, Phase Gadget, NOT INCLUDED EXTRACTION COST
+            node_feature = [0.0 for _ in range(12)]
+
+            # Frontier Node
+            if node in self.graph.inputs():
+                node_feature[8] = 1.0
+            elif node in self.graph.outputs():
+                node_feature[9] = 1.0
+            else:
+                oh_phase_idx = int(self.graph.phase(node) / (0.25))
+                if oh_phase_idx not in range(1,8) and self.graph.phase(node) != 0:
+                    node_feature[10] = 1.0
+                else:
+                    node_feature[oh_phase_idx] = 1.0
+                if len(self.graph.neighbors(node)) == 1:  # Phase Gadget
+                    node_feature[11] = 1.0
+            node_features.append(node_feature)
+                
+        for edge in edge_list:
+            # Edge in graph, pull node, pushed node.
+            # Graph edge
+            edge_feature = [0 for _ in range(2)]
+            if self.graph.edge_type(edge) == EdgeType.HADAMARD:
+                edge_feature[0] = 1.0
+            elif self.graph.edge_type(edge) == EdgeType.SIMPLE:
+                edge_feature[1] = 1.0
+           
+            edge_features.append(edge_feature)
+        return  {"node features": node_features ,"edge_list": edge_list, "edge_features": edge_features}
