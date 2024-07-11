@@ -4,7 +4,7 @@ import random
 import time
 
 
-import gym
+import gymnasium as gym
 import gym_zx
 import networkx as nx
 import numpy as np
@@ -190,7 +190,7 @@ if __name__ == "__main__":
             actions[step] = action
             logprobs[step] = logprob
             
-            next_obs, reward, done, deprecated, info = envs.step(action_ids.cpu().numpy())
+            0
             rewards[step] = torch.tensor(reward).to(device).view(-1)
 
             next_done = torch.Tensor(done).to(device)

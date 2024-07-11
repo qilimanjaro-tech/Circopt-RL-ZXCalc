@@ -7,7 +7,7 @@ from fractions import Fraction
 from typing import Callable, Dict, List, Optional, Set, Tuple, Union
 
 import matplotlib.pyplot as plt
-import gym
+import gymnasium as gym
 import networkx as nx
 import numpy as np
 import pyzx as zx
