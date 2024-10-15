@@ -11,7 +11,7 @@ import networkx as nx
 import numpy as np
 import pyzx as zx
 import torch
-from gym.spaces import Box, Discrete, Graph, MultiDiscrete
+from gymnasium.spaces import Box, Discrete, Graph, MultiDiscrete
 from pyzx.circuit import CNOT, HAD, SWAP, Circuit
 from pyzx.extract import bi_adj, connectivity_from_biadj, greedy_reduction, id_simp, max_overlap, permutation_as_swaps
 
@@ -198,6 +198,7 @@ class ZXEnv(gym.Env):
                     "episode_len": self.episode_len,
                     "pyzx_stats": self.pyzx_data,
                     "rl_stats": self.get_data(self.final_circuit),
+                    "single_opt_episode_len": self.opt_episode_len,
                     "no_opt_stats": self.no_opt_stats,
                     "swap_cost": self.swap_cost,
                     "pyzx_swap_cost": self.pyzx_swap_cost,
@@ -255,6 +256,13 @@ class ZXEnv(gym.Env):
                self.qubits, self.depth, p_t=0.17, p_s=0.24, p_hsh=0.25, 
             )
             c = zx.Circuit.from_graph(g)
+           
+            """c = zx.Circuit.from_qasm_file("/home/jnogue/qilimanjaro/Circopt-RL-ZXCalc/qasm_circuit.qasm")
+            g = c.to_graph()
+            string = c.to_qasm()
+            
+            with open("qasm_circuit.qasm", "w") as file:
+                file.write(string)"""
             self.no_opt_stats = self.get_data(c.to_basic_gates())
             self.initial_depth = c.to_basic_gates().depth()
             self.rand_circuit = zx.optimize.basic_optimization(c.split_phase_gates())

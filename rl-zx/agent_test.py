@@ -71,7 +71,7 @@ def get_results(param):
     agent = AgentGNN(envs, device).to(device)  
 
     agent.load_state_dict(
-        torch.load("state_dict_model5x70_twoqubits_new.pt", map_location=torch.device("cpu"))
+        torch.load("/home/jnogue/qilimanjaro/Circopt-RL-ZXCalc/rl-zx/state_dict_model5x70_twoqubits_new.pt", map_location=torch.device("cpu"))
     )  
     agent.eval()
    
@@ -241,8 +241,8 @@ import json
 import multiprocessing as mp
 
 if __name__ == "__main__":
-    qubits = [5]
-    depths = [55,110]
+    qubits = [3,3,3,3,3,3,3,3,3,3,3,3,3,3,3]
+    depths = [20,20,20,20,20,20,20,20,20,20,20]
     for qubit in qubits:
         fr_time_depth, rl_time_depth = [],[]
         fr_time_var, rl_time_var = [],[]

@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch_geometric.nn as geom_nn
+import torch.nn.functional as F
 
 
 from torch.distributions.categorical import Categorical
@@ -16,14 +17,21 @@ class CategoricalMasked(Categorical):
             self.masks = masks.type(torch.BoolTensor).to(device)
             logits = torch.where(self.masks, logits, torch.tensor(-1e8).to(device))
         super(CategoricalMasked, self).__init__(probs, logits, validate_args)
-
+        
     def entropy(self, device):
         if len(self.masks) == 0:
             return super(CategoricalMasked, self).entropy()
         p_log_p = self.logits * self.probs
         p_log_p = torch.where(self.masks, p_log_p, torch.tensor(0.0).to(device))
         return -p_log_p.sum(-1)
-
+    
+    def action_distribution(self, logits=None, masks = None):
+        if masks is None:
+            masks = []
+        trimming_actions = [sum(sublist) for sublist in masks.tolist()]
+        num_actions = int(trimming_actions[0])
+        logits_actions = logits[0][:num_actions]
+        return F.softmax(logits_actions, dim=-1)
 
 class AgentGNN(nn.Module):
     def __init__(
@@ -37,10 +45,8 @@ class AgentGNN(nn.Module):
         super().__init__()
 
         self.device = device
-        self.obs_shape = envs.envs[0].shape
-        self.bin_required = int(np.ceil(np.log2(self.obs_shape)))
-        self.qubits = envs.envs[0].qubits
-
+       
+        self.obs_shape = 1000
         c_in_p = 16
         c_in_v = 11
         edge_dim = 6
@@ -190,7 +196,7 @@ class AgentGNN(nn.Module):
             
         # Sample from each set of probs using Categorical
         categoricals = CategoricalMasked(logits=batch_logits, masks=act_mask, device=device)
-
+        probabilities = categoricals.action_distribution(logits = batch_logits, masks = act_mask)
         # Convert the list of samples back to a tensor
         values = values.squeeze(-1)
         if action is None:
@@ -202,11 +208,14 @@ class AgentGNN(nn.Module):
             action_id = torch.tensor([0]).to(device)
             
         if testing:
-            return action.T, action_id.T
+            return action.permute(*torch.arange(action.ndim - 1, -1, -1)), action_id.permute(*torch.arange(action_id.ndim - 1, -1, -1))
         
         logprob = categoricals.log_prob(action)
         entropy = categoricals.entropy(device)
-        return action.T, logprob, entropy, values, torch.tensor(action_logits).to(device).reshape(-1, 1), action_id.T
+        return (action.permute(*torch.arange(action.ndim - 1, -1, -1)), 
+                logprob, entropy, values, action_logits.clone().detach().to(device).reshape(-1, 1), 
+                action_id.permute(*torch.arange(action_id.ndim - 1, -1, -1)),
+                probabilities.clone().detach().to(device).reshape(-1, 1))
 
     def get_value(self, x):
         values = self.critic(x)

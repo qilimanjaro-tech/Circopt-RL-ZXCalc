@@ -3,7 +3,7 @@ import subprocess
 
 os.system("pip install -r requirements.txt")
 
-subprocess.run(["pip", "install", "git+https://github.com/calumholker/pyzx.git"], check=True)
+subprocess.run(["pip", "install", "-e", "git+https://github.com/jng164/pyzx.git#egg=pyzx"], check=True)
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 
