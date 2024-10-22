@@ -32,10 +32,10 @@ class ZXEnv(gym.Env):
         self.device = "cuda"
         self.clifford = False
         self.qubits, self.depth = qubits, depth
-        self.shape = 3000
-        self.gate_type = "twoqubits"
+        self.shape = 600
+        self.gate_type = "gates"
 
-        self.max_episode_len = 75
+        self.max_episode_len = 500
         self.cumulative_reward_episodes = 0
         self.win_episodes = 0
         self.max_compression = 20
@@ -147,7 +147,7 @@ class ZXEnv(gym.Env):
             self.min_gates = new_gates
             self.final_circuit = circ            
             
-        if new_gates <= self.min_gates:
+        if new_gates <= self.min_gates and act_type != "STOP":
             self.opt_episode_len = self.episode_len
             self.best_action_stats = copy.deepcopy(self.episode_stats)
 
@@ -236,8 +236,8 @@ class ZXEnv(gym.Env):
         )
 
 
-    def reset(self):
-        # parameters
+    def reset(self, seed=None, options=None):
+        super().reset(seed=seed)
         self.episode_len = 0
         self.episode_reward = 0
         self.action_pattern = []
