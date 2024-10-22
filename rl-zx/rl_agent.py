@@ -46,7 +46,7 @@ class AgentGNN(nn.Module):
 
         self.device = device
        
-        self.obs_shape = 1000
+        self.obs_shape = 3000
         c_in_p = 16
         c_in_v = 11
         edge_dim = 6

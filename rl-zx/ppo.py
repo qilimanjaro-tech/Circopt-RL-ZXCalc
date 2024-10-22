@@ -4,7 +4,7 @@ import random
 import time
 
 
-import gym
+import gymnasium as gym
 import gym_zx
 import networkx as nx
 import numpy as np
