@@ -40,6 +40,11 @@ class ZXEnv(gym.Env):
         self.win_episodes = 0
         self.max_compression = 20
 
+        self.number_node_features_policy = 17
+        self.number_node_features_value = 12
+        self.number_edge_features_policy = 7
+        self.number_edge_features_value = 2
+
         # Unused variables but required for gym
         self.action_space = Discrete(1)
         self.single_action_space = Discrete(1)
@@ -323,8 +328,12 @@ class ZXEnv(gym.Env):
         if check_isolated_vertices:
             self.graph.remove_isolated_vertices()
 
-    def policy_obs(self):
+    def policy_obs(self): 
+        """graph_0 = zx.draw_matplotlib(self.graph, labels=True, figsize=(10,6))
+        graph_0.savefig("graph"+str(self.count)+".png")
+        self.count = self.count + 1  # Save the current figure"""
         """Enters the graph in format ZX"""
+        action_dict = {}
         piv_nodes = self.pivot_info_dict.keys()
         lcomp_nodes = self.match_lcomp()
         iden_nodes = self.match_ids()
@@ -335,7 +344,7 @@ class ZXEnv(gym.Env):
         graph_nx.add_nodes_from(v_list)
         graph_nx.add_edges_from(e_list)
 
-        # make the graph directed to duplicate edges
+        # make the graph directed to duplicate edges, the GNN takes into account information of both directions.
         graph_nx = graph_nx.to_directed()
         # relabel 0->N nodes
         mapping = {node: i for i, node in enumerate(graph_nx.nodes)}
@@ -355,13 +364,12 @@ class ZXEnv(gym.Env):
             neighbors_outputs.append(list(self.graph.neighbors(vertice))[0])
 
         node_features = []
-        number_node_features = 16
         for node in sorted(p_graph.nodes):
             real_node = identifier[node]
 
             # Features: One-Hot phase, Frontier In, Frontier 0ut, Gadget, LC Node, PV Node,
             # STOP Node, ID Node, GadgetF, NOT INCLUDED Extraction Cost
-            node_feature = [0.0 for _ in range(number_node_features)]
+            node_feature = [0.0 for _ in range(self.number_node_features_policy)]
 
             # Frontier Node
             if real_node in self.graph.inputs():
@@ -371,10 +379,13 @@ class ZXEnv(gym.Env):
             else:
                 # One-Hot phase
                 oh_phase_idx = int(self.graph.phase(real_node) / (0.25))
-                node_feature[oh_phase_idx] = 1.0
-
-                if self.graph.neighbors(real_node) == 1:  # Phase Gadget
+                if oh_phase_idx not in range(0,8) and self.graph.phase(real_node) != 0:
                     node_feature[10] = 1.0
+                else:
+                    node_feature[oh_phase_idx] = 1.0
+
+                if len(self.graph.neighbors(real_node)) == 1:  # Phase Gadget
+                    node_feature[11] = 1.0
 
             # Extraction cost
             node_features.append(node_feature)
@@ -386,64 +397,78 @@ class ZXEnv(gym.Env):
         current_node = n_nodes
         edge_list = list(p_graph.edges)
         edge_features = []
-        edge_feature_number = 6
         for edge in edge_list:
             # True: 1, False: 0. Features: Graph edge, NOT INCLUDED brings to frontier, NOT INCLUDED is brought by,
             # Removing Node-LC,Removing Node-PV, Removing Node-ID, Gadget fusion, Between Action
             node1, node2 = identifier[edge[0]], identifier[edge[1]]
-            edge_feature = [0.0 for _ in range(edge_feature_number)]
+            edge_feature = [0.0 for _ in range(self.number_edge_features_policy)]
 
             # Graph edge
-            edge_feature[0] = 1.0
+            if self.graph.edge_type(edge) == EdgeType.HADAMARD:
+                edge_feature[0] = 1.0
+            elif self.graph.edge_type(edge) == EdgeType.SIMPLE:
+                edge_feature[1] = 1.0
             edge_features.append(edge_feature)
 
+        num_edge = len(edge_features)
+        
         # Add action nodes from lcomp and pivoting lists and connect them
         for node in lcomp_nodes:
-            node_feature = [0 for _ in range(number_node_features)]
-            node_feature[11] = 1.0
+            node_feature = [0 for _ in range(self.number_node_features_policy)]
+            node_feature[12] = 1.0
             node_features.append(node_feature)
             identifier.append(node * self.shape + node)
             # Connect the node to the rest of the graph
             graph_node = mapping[node]
             edge_list.append((mapping[node], current_node))
-            edge_feature = [0 for _ in range(edge_feature_number)]
-            edge_feature[1] = 1.0
+            edge_feature = [0 for _ in range(self.number_edge_features_policy)]
+            edge_feature[2] = 1.0
             edge_features.append(edge_feature)
+            action_dict[node] = {"identifier": node * self.shape + node,"node_feature": node_feature, 
+                                 "edge_list": [(mapping[node], current_node)],
+                                 "edge_feature":edge_feature}
 
             current_node += 1
 
         for node in iden_nodes:
-            node_feature = [0 for _ in range(number_node_features)]
-            node_feature[14] = 1.0
+            node_feature = [0 for _ in range(self.number_node_features_policy)]
+            node_feature[13] = 1.0
             node_features.append(node_feature)
             identifier.append(self.shape**2 + node)
             graph_node = mapping[node]
             edge_list.append((mapping[node], current_node))
-            edge_feature = [0 for _ in range(edge_feature_number)]
+            edge_feature = [0 for _ in range(self.number_edge_features_policy)]
             edge_feature[3] = 1.0
             edge_features.append(edge_feature)
+            action_dict[node] = {"identifier": self.shape**2 + node, "node_feature": node_feature, 
+                                 "edge_list": [(mapping[node], current_node)],
+                                 "edge_feature":edge_feature}
 
             current_node += 1
 
         for node1, node2 in piv_nodes:
-            node_feature = [0 for _ in range(number_node_features)]
-            node_feature[12] = 1.0
+            node_feature = [0 for _ in range(self.number_node_features_policy)]
+            node_feature[14] = 1.0
             node_features.append(node_feature)
             identifier.append(node1 * self.shape + node2)
             graph_node1 = mapping[node1]
             graph_node2 = mapping[node2]
             edge_list.append((graph_node1, current_node))
             edge_list.append((graph_node2, current_node))
-            edge_feature = [0 for _ in range(edge_feature_number)]
-            edge_feature[2] = 1.0
+            edge_feature = [0 for _ in range(self.number_edge_features_policy)]
+            edge_feature[4] = 1.0
             edge_features.append(edge_feature)
             edge_features.append(edge_feature)
 
+            action_dict[(node1,node2)] = {"identifier": node1 * self.shape + node2,
+                                            "node_feature": node_feature, "edge_list": [(graph_node1, current_node), (graph_node2,current_node)]
+                                            ,"edge_feature":edge_feature}
+        
             current_node += 1
 
         for idx, gadgetf in enumerate(self.gadget_fusion_ids):
 
-            node_feature = [0 for _ in range(number_node_features)]
+            node_feature = [0 for _ in range(self.number_node_features_policy)]
             node_feature[15] = 1.0
             node_features.append(node_feature)
             identifier.append(-(idx + 2))
@@ -451,32 +476,38 @@ class ZXEnv(gym.Env):
             for node in gadgetf:
                 graph_node = mapping[node]
                 edge_list.append((graph_node, current_node))
-                edge_feature = [0 for _ in range(edge_feature_number)]
+                edge_feature = [0 for _ in range(self.number_edge_features_policy)]
                 edge_feature[4] = 1.0
                 edge_features.append(edge_feature)
 
             current_node += 1
 
+
         # Add action for STOP node
 
-        node_feature = [0 for _ in range(number_node_features)]
-        node_feature[13] = 1.0
+        node_feature = [0 for _ in range(self.number_node_features_policy)]
+        node_feature[16] = 1.0
         node_features.append(node_feature)
         identifier.append(self.shape * (self.shape + 1) + 1)
-
         for j in range(n_nodes, current_node):
             # Other actions feed Stop Node
             edge_list.append((j, current_node))
-            edge_feature = [0 for _ in range(edge_feature_number)]
-            edge_feature[5] = 1.0
+            edge_feature = [0 for _ in range(self.number_edge_features_policy)]
+            edge_feature[6] = 1.0
             edge_features.append(edge_feature)
 
+
+        node_list = identifier[:n_nodes]
+        identifier[:n_nodes] = [-1] *n_nodes
+        self.policy_obs_dict = {"node_list": node_list ,"identifier": identifier[n_nodes:-1], "node_features": node_features[:n_nodes],"edge_list":edge_list[:num_edge], "edge_features":edge_features[:num_edge], 
+                                "num_nodes": n_nodes, "num_edges": num_edge, "action_dict": action_dict }
         # Create tensor objects
-        x = torch.tensor(node_features).view(-1, number_node_features)
+        x = torch.tensor(node_features).view(-1, self.number_node_features_policy)
         x = x.type(torch.float32)
+        
         edge_index = torch.tensor(edge_list).t().contiguous()
-        edge_features = torch.tensor(edge_features).view(-1, edge_feature_number)
-        identifier[:n_nodes] = [-1] * n_nodes
+        edge_features = torch.tensor(edge_features).view(-1, self.number_edge_features_policy)
+       
         identifier = torch.tensor(identifier)
         return (
             x.to(self.device),
@@ -512,7 +543,7 @@ class ZXEnv(gym.Env):
         for node in sorted(V.nodes):
             real_node = identifier[node]
             # Features: Onehot PHASE, Frontier In, Frontier 0ut, Phase Gadget, NOT INCLUDED EXTRACTION COST
-            node_feature = [0.0 for _ in range(11)]
+            node_feature = [0.0 for _ in range(self.number_node_features_value)]
 
             # Frontier Node
             if real_node in self.graph.inputs():
@@ -521,9 +552,12 @@ class ZXEnv(gym.Env):
                 node_feature[9] = 1.0
             else:
                 oh_phase_idx = int(self.graph.phase(real_node) / (0.25))
-                node_feature[oh_phase_idx] = 1.0
-                if self.graph.neighbors(real_node) == 1:  # Phase Gadget
+                if oh_phase_idx not in range(0,8) and self.graph.phase(real_node) != 0:
                     node_feature[10] = 1.0
+                else:
+                    node_feature[oh_phase_idx] = 1.0
+                if len(self.graph.neighbors(real_node)) == 1:  # Phase Gadget
+                    node_feature[11] = 1.0
 
             node_features.append(node_feature)
 
@@ -533,15 +567,24 @@ class ZXEnv(gym.Env):
             edge_list.append((node2, node1))
 
         edge_features = []
-        for node1, node2 in edge_list:
+        for edge in edge_list:
             # Edge in graph, pull node, pushed node.
-            edge_feature = [1.0, 0.0, 0.0]
+            # Graph edge
+            edge_feature = [0 for _ in range(self.number_edge_features_value)]
+            if self.graph.edge_type(edge) == EdgeType.HADAMARD:
+                edge_feature[0] = 1.0
+            elif self.graph.edge_type(edge) == EdgeType.SIMPLE:
+                edge_feature[1] = 1.0
+           
             edge_features.append(edge_feature)
         
+        self.value_obs_dict = {"node features": node_features,"edge_list":edge_list, "edge_features":edge_features}
+        #Create tensor objects
         edge_index_value = torch.tensor(edge_list).t().contiguous()
-        x_value = torch.tensor(node_features).view(-1, 11)
+        x_value = torch.tensor(node_features).view(-1, self.number_node_features_value)
         x_value = x_value.type(torch.float32)
-        edge_features = torch.tensor(edge_features).view(-1, 3)
+        edge_features = torch.tensor(edge_features).view(-1, self.number_edge_features_value)
+
         return (x_value.to(self.device), edge_index_value.to(self.device), edge_features.to(self.device))
     
     MatchLcompType = Tuple[VT,Tuple[VT,...]]
