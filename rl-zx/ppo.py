@@ -4,7 +4,7 @@ import random
 import time
 
 
-import gym
+import gymnasium as gym
 import gym_zx
 import networkx as nx
 import numpy as np
@@ -12,11 +12,11 @@ import pyzx as zx
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.multiprocessing as mp
 
 from distutils.util import strtobool
 from torch.utils.tensorboard import SummaryWriter
 from torch_geometric.data import Batch, Data
-
 from rl_agent import AgentGNN
 
 count = 0
@@ -81,16 +81,22 @@ def parse_args():
         help="the maximum norm for the gradient clipping")
     parser.add_argument("--target-kl", type=float, default=None,
         help="the target KL divergence threshold")
+    parser.add_argument("--nodes", type=int, default=1,
+        help="the number of nodes in the slurm script")
+    parser.add_argument("--cpus-per-task", type=int, default=20,
+        help="the number of cpus-per-task in the slurm script")
+    parser.add_argument("--tasks-per-node", type=int, default=4,
+        help="the number of tasks per node in the slurm script")
     args = parser.parse_args()
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
     # fmt: on
     return args
 
-def make_env(gym_id, seed, idx, capture_video, run_name, qubits, depth):
+def make_env(gym_id, seed, idx, capture_video, run_name, qubits, depth, toffoli,circuit, basic_opt,tele_reduce):
     
     def thunk():
-        env = gym.make(gym_id, qubits=qubits, depth=depth)
+        env = gym.make(gym_id, qubits=qubits, depth=depth, env_id= idx,circuit=circuit, toffoli=toffoli, basic_opt=basic_opt, tele_red=tele_reduce)
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if capture_video and idx == 0:
             env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
@@ -100,6 +106,7 @@ def make_env(gym_id, seed, idx, capture_video, run_name, qubits, depth):
 
 
 if __name__ == "__main__":
+    mp.set_start_method('spawn') ##set multiprocessing spawn for CUDA multiprocessing
     args = parse_args()
     run_name = f"{args.gym_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
     writer = SummaryWriter(f"runs/{run_name}")
@@ -110,7 +117,15 @@ if __name__ == "__main__":
     
     #Training size
     qubits = 5
-    depth = 55
+    depth = 70
+    toffoli=False
+    dirname = "/gpfs/projects/qili01/rl-zx/Copt-cquere/rl-zx/cquere/circuits/before/ibm_pretraining/"
+    circuit_name = '6q_QAOA.qasm'
+    dir_weights = 'acc_weights/'+args.exp_name+'/'
+    #circuit= zx.Circuit.from_qasm_file(dirname + circuit_name).to_basic_gates()
+    basic_opt=False
+    tele_reduce=False
+    circuit=None
     
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -118,9 +133,14 @@ if __name__ == "__main__":
     torch.backends.cudnn.deterministic = args.torch_deterministic
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
-    envs = gym.vector.SyncVectorEnv(
-        [make_env(args.gym_id, args.seed + i, i, args.capture_video, run_name, qubits, depth) for i in range(args.num_envs)]
-    )
+    #device = torch.device("cpu")
+    
+    envs = gym.vector.AsyncVectorEnv(
+       [make_env(args.gym_id, args.seed + i, i, args.capture_video, run_name, qubits, depth, toffoli, circuit, basic_opt, tele_reduce) for i in range(args.num_envs)], 
+       shared_memory=False)
+    """envs = gym.vector.SyncVectorEnv(
+       [make_env(args.gym_id, args.seed + i, i, args.capture_video, run_name, qubits, depth, toffoli, circuit, basic_opt, tele_reduce) for i in range(args.num_envs)])"""
+    
     agent = AgentGNN(envs, device).to(device)
 
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
@@ -159,13 +179,17 @@ if __name__ == "__main__":
     optimal_episode_length = []
     pyzx_gates = []
     rl_gates = []
+    korb_gates = []
     swap_gates = []
     pyzx_swap_gates = []
     wins_vs_pyzx = []
+
     for update in range(1, num_updates + 1):
         # Annealing the rate if instructed to do so.
+
         if update % 50 == 1:
-            torch.save(agent.state_dict(), "state_dict_" + str(global_step) + "model5x70_twoqubits_new.pt")
+            torch.save(agent.state_dict(), dir_weights+"state_dict_" + str(global_step) + args.exp_name+".pt")
+        
         if args.anneal_lr:
             frac = max(1.0 / 100, 1.0 - (update - 1.0) / (num_updates * 5.0 / 6))
             lrnow = frac * args.learning_rate
@@ -188,8 +212,10 @@ if __name__ == "__main__":
                 values[step] = value.flatten()
             actions[step] = action
             logprobs[step] = logprob
-
+            
             next_obs, reward, done, deprecated, info = envs.step(action_ids.cpu().numpy())
+            
+        
             rewards[step] = torch.tensor(reward).to(device).view(-1)
 
             next_done = torch.Tensor(done).to(device)
@@ -207,15 +233,6 @@ if __name__ == "__main__":
 
             next_obs_graph = (Batch.from_data_list(new_policy_data), Batch.from_data_list(new_value_data))
 
-            if "action" in info.keys():
-                for element in info["action"]:
-                    action_counter.append(element)
-
-                for element in info["nodes"]:
-                    if element is not None:
-                        for node in element:
-                            action_nodes.append(node)
-
             if info != {} and "final_info" in info.keys():
                 for idx, item in enumerate(info["final_info"]):
                     if done[idx]:
@@ -226,10 +243,10 @@ if __name__ == "__main__":
                         remaining_lcomp_size.append(item["remaining_lcomp_size"])
                         cumulative_max_reward_difference.append(item["max_reward_difference"])
                         action_patterns.append(item["action_pattern"])
-                        action_counter.append(item["action"])
                         optimal_episode_length.append(item["opt_episode_len"])
                         pyzx_gates.append(item["pyzx_gates"])
                         rl_gates.append(item["rl_gates"])
+                        korb_gates.append(item["korb_gates"])
                         swap_gates.append(item["swap_cost"])
                         pyzx_swap_gates.append(item["pyzx_swap_cost"])
                         wins_vs_pyzx.append(item["win_vs_pyzx"])
@@ -261,8 +278,8 @@ if __name__ == "__main__":
                         next_return = returns[t + 1]
                     returns[t] = rewards[t] + args.gamma * nextnonterminal * next_return
                 advantages = returns - values
-
-        
+            
+        #flatten the batch
         b_logprobs = logprobs.reshape(-1)
         b_actions = actions.reshape((-1,) + envs.single_action_space.shape)
         b_advantages = advantages.reshape(-1)
@@ -287,10 +304,12 @@ if __name__ == "__main__":
 
                 _, newlogprob, entropy, newvalue, logits, _ = agent.get_action_and_value(
                     (policies_batch, values_batch),
-                    b_actions.long()[mb_inds].T, device=device
+                    b_actions.long()[mb_inds].permute(*torch.arange(b_actions.long()[mb_inds].ndim - 1, -1, -1))
+                    , device=device
                 )  # training begins, here we pass minibatch action so the agent doesnt sample a new action
                 logratio = newlogprob - b_logprobs[mb_inds]  # logratio = log(newprob/oldprob)
                 ratio = logratio.exp()
+                torch.cuda.empty_cache()   
 
                 with torch.no_grad():
                     # calculate approx_kl http://joschu.net/blog/kl-approx.html
@@ -329,11 +348,12 @@ if __name__ == "__main__":
                 loss.backward()
                 nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)
                 optimizer.step()
+            torch.cuda.empty_cache() #free memory after completing an epoch
 
             if args.target_kl is not None:
                 if approx_kl > args.target_kl:
                     break
-
+            torch.cuda.empty_cache()   
         y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
         var_y = np.var(y_true)
         explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
@@ -368,6 +388,7 @@ if __name__ == "__main__":
         )
         writer.add_scalar("charts/pyzx_gates", sum(pyzx_gates) / len(pyzx_gates), global_step)
         writer.add_scalar("charts/rl_gates", sum(rl_gates) / len(rl_gates), global_step)
+        writer.add_scalar("charts/korb_gates", sum(korb_gates) / len(korb_gates), global_step)
         writer.add_scalar("charts/wins_vs_pyzx", sum(wins_vs_pyzx) / len(wins_vs_pyzx), global_step)
         writer.add_scalar("charts/value_function", torch.mean(b_values), global_step)
         writer.add_scalar("charts/swap_gates", sum(swap_gates) / len(swap_gates), global_step)
@@ -378,46 +399,13 @@ if __name__ == "__main__":
             sum(rl_gates) / len(rl_gates),
             " pyzx_gates: ",
             sum(pyzx_gates) / len(pyzx_gates),
+            "korb_gates: ",
+            sum(korb_gates) / len(korb_gates),
             " wins: ",
             sum(wins_vs_pyzx) / len(wins_vs_pyzx),
         )
         writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
-        writer.add_histogram("histograms/reward_distribution", np.array(cumulative_reward), global_step)
-        writer.add_histogram("histograms/episode_length_distribution", np.array(cumulative_episode_length), global_step)
-        writer.add_histogram("histograms/action_counter_distribution", np.array(action_counter), global_step)
-        writer.add_histogram("histograms/action_nodes_distribution", np.array(action_nodes), global_step)
-        writer.add_histogram(
-            "histograms/remaining_pivot_size_distribution", np.array(remaining_pivot_size), global_step
-        )
-        writer.add_histogram(
-            "histograms/remaining_lcomp_size_distribution", np.array(remaining_lcomp_size), global_step
-        )
-        writer.add_histogram(
-            "histograms/max_reward_difference_distribution", np.array(cumulative_max_reward_difference), global_step
-        )
-        writer.add_histogram("histograms/opt_episode_len_distribution", np.array(optimal_episode_length), global_step)
-        writer.add_histogram("histograms/rl_gates", np.array(rl_gates), global_step)
-        writer.add_histogram("histograms/pyzx_gates", np.array(pyzx_gates), global_step)
-        writer.add_histogram(
-            "histograms/value_function",
-            b_values.cpu()
-            .detach()
-            .numpy()
-            .reshape(
-                -1,
-            ),
-            global_step,
-        )
-        writer.add_histogram(
-            "histograms/logits",
-            logits.cpu()
-            .detach()
-            .numpy()
-            .reshape(
-                -1,
-            ),
-            global_step,
-        )
+        print(int(global_step / (time.time() - start_time)))
 
         cumulative_episode_length = []
         cumulative_reward = []
@@ -431,10 +419,13 @@ if __name__ == "__main__":
         optimal_episode_length = []
         pyzx_gates = []
         rl_gates = []
+        korb_gates = []
         swap_gates = []
         pyzx_swap_gates = []
         wins_vs_pyzx = []
+    torch.save(agent.state_dict(), args.exp_name+".pt") 
+    torch.cuda.empty_cache()   
     envs.close()
     writer.close()
+    torch.cuda.empty_cache()
 
-torch.save(agent.state_dict(), "state_dict_model5x70_twoqubits_new.pt")
