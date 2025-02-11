@@ -12,10 +12,10 @@ import sys
 import os
 
 # Add the directory to the system path
-"""sys.path.insert(0,'/gpfs/projects/qili01/rl-zx/applications-sdk-to_qasm/variational-algorithms/')
+sys.path.insert(0,'/gpfs/projects/qili01/rl-zx/applications-sdk-to_qasm/variational-algorithms/')
 from variational_algorithms.use_cases.maxcut.cost_function import MaxCut_CostFunction
 from variational_algorithms.use_cases.maxcut.instances import MaxCut_Instance
-from variational_algorithms.ansatz import QAOAAnsatz"""
+from variational_algorithms.ansatz import QAOAAnsatz
 
 
 import matplotlib.pyplot as plt
@@ -46,7 +46,7 @@ class ZXEnv(gym.Env):
         self.clifford = False
         self.qubits, self.depth = qubits, depth
         self.shape = 3000
-        self.gate_type = "twoqubit"
+        self.gate_type = "twoqubits"
 
         self.max_episode_len = 2000
         self.cumulative_reward_episodes = 0
@@ -1155,7 +1155,7 @@ class ZXEnv(gym.Env):
         d["CNOT"] = cnots
         d["CZ"] = cz
         d["had"] = hadamards
-        d["twoqubit"] = twoqubits
+        d["twoqubits"] = twoqubits
 
         return d
 
@@ -1178,16 +1178,12 @@ class ZXEnv(gym.Env):
         
         c2 = zx.basic_optimization(c.copy(), do_swaps=True).to_basic_gates()
         
-        if c1.twoqubitcount() < c2.twoqubitcount() and c1.twoqubitcount() <= c.twoqubitcount():
+        if c1.twoqubitcount() <= c2.twoqubitcount() and c1.twoqubitcount() < c.twoqubitcount():
             return c1  # As this optimisation algorithm is targetted at reducting H-gates, we use the circuit with the smaller 2-qubit gate count here, either using SWAP rules or not.
-        elif c2.twoqubitcount() < c1.twoqubitcount() and c2.twoqubitcount() <= c.twoqubitcount():
+        elif c2.twoqubitcount() < c1.twoqubitcount() and c2.twoqubitcount() < c.twoqubitcount():
             return c2
-        elif c1.twoqubitcount() == c2.twoqubitcount():
-            if len(c1.gates) > len(c2.gates):
-                return c2
-            else:
-                return c1
-        return c
+        
+        return c2#TODO
 
 
     def flow_opt(self,g):

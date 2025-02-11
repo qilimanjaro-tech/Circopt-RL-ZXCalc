@@ -1,0 +1,118 @@
+{
+    "Adder8": {
+        "gates": 245,
+        "twoqubit": 116
+    },
+    "barenco_tof_3": {
+        "gates": 40,
+        "twoqubit": 17
+    },
+    "barenco_tof_4": {
+        "gates": 73,
+        "twoqubit": 34
+    },
+    "barenco_tof_5": {
+        "gates": 113,
+        "twoqubit": 50
+    },
+    "barenco_tof_10": {
+        "gates": 302,
+        "twoqubit": 138
+    },
+    "csla_mux_3_original": {
+        "gates": 146,
+        "twoqubit": 65
+    },
+    "csum_mux_9_corrected": {
+        "gates": 281,
+        "twoqubit": 138
+    },
+    "gf2^4_mult": {
+        "gates": 172,
+        "twoqubit": 93
+    },
+    "gf2^5_mult": {
+        "gates": 275,
+        "twoqubit": 147
+    },
+    "gf2^6_mult": {
+        "gates": 386,
+        "twoqubit": 208
+    },
+    "mod_mult_55": {
+        "gates": 87,
+        "twoqubit": 39
+    },
+    "mod5_4": {
+        "gates": 24,
+        "twoqubit": 13
+    },
+    "QFT8_before": {
+        "gates": 97,
+        "twoqubit": 42
+    },
+    "QFT16_before": {
+        "gates": 326,
+        "twoqubit": 155
+    },
+    "rc_adder_6": {
+        "gates": 154,
+        "twoqubit": 67
+    },
+    "tof_3": {
+        "gates": 35,
+        "twoqubit": 14
+    },
+    "tof_4": {
+        "gates": 57,
+        "twoqubit": 23
+    },
+    "tof_5": {
+        "gates": 77,
+        "twoqubit": 31
+    },
+    "tof_10": {
+        "gates": 183,
+        "twoqubit": 78
+    },
+    "vbe_adder_3": {
+        "gates": 81,
+        "twoqubit": 34
+    },
+    "grover_5": {
+        "gates": 501,
+        "twoqubit": 217
+    },
+    "hwb6": {
+        "gates": 204,
+        "twoqubit": 91
+    },
+    "qft_4": {
+        "gates": 145,
+        "twoqubit": 35
+    },
+    "QFTAdd8": {
+        "gates": 284,
+        "twoqubit": 149
+    },
+    "mod_red_21": {
+        "gates": 188,
+        "twoqubit": 80
+    },
+    "qcla_adder_10": {
+        "gates": 397,
+        "twoqubit": 179
+    },
+    "qcla_com_7": {
+        "gates": 282,
+        "twoqubit": 125
+    },
+    "qcla_mod_7": {
+        "gates": 673,
+        "twoqubit": 297
+    },
+    "ham15-low": {
+        "gates": 340,
+        "twoqubit": 186
+    }
+}
