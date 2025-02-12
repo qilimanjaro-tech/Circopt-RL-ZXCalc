@@ -6,10 +6,10 @@ This repository contains the code used to produce the results of the publication
 The code used to create Table 2 from the paper can be found in the file ```benchmark.py```.
 
 * The optimized circuits can be found in the ```rl-zx/results/circuits``` path:
-    * Original: Contains the original circuits.
-    * gflow-cflow-opt: Contains the optimized circuits using the combination of [Staudacher et al.](https://arxiv.org/abs/2311.08881) and [Holker](https://arxiv.org/abs/2312.02793)
-    * NRSCM: Contains the optimized circuits using the algorithm from [Nam et al.](https://arxiv.org/abs/1710.07345).
-    * rl-zx-opt: Contains the optimized circuits using the RL agent presented in this paper. 
+    * **Original**: Contains the original circuits.
+    * **gflow-cflow-opt**: Contains the optimized circuits using the combination of [Staudacher et al.](https://arxiv.org/abs/2311.08881) and [Holker](https://arxiv.org/abs/2312.02793)
+    * **NRSCM**: Contains the optimized circuits using the algorithm from [Nam et al.](https://arxiv.org/abs/1710.07345).
+    * **rl-zx-opt**: Contains the optimized circuits using the RL agent presented in this paper. 
 
 * In ```rl-zx/results/data```are the ```json```files used to generate Figure 11.
 
