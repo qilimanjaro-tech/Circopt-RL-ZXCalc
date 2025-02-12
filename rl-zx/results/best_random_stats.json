@@ -1,0 +1,152 @@
+{
+    "Adder8": {
+        "gates": 258,
+        "twoqubit": 116,
+        "single qubit": 142
+    },
+    "barenco_tof_3": {
+        "gates": 42,
+        "twoqubit": 17,
+        "single qubit": 25
+    },
+    "barenco_tof_4": {
+        "gates": 73,
+        "twoqubit": 34,
+        "single qubit": 39
+    },
+    "barenco_tof_5": {
+        "gates": 115,
+        "twoqubit": 50,
+        "single qubit": 65
+    },
+    "barenco_tof_10": {
+        "gates": 317,
+        "twoqubit": 138,
+        "single qubit": 179
+    },
+    "csla_mux_3_original": {
+        "gates": 148,
+        "twoqubit": 65,
+        "single qubit": 83
+    },
+    "csum_mux_9_corrected": {
+        "gates": 286,
+        "twoqubit": 138,
+        "single qubit": 148
+    },
+    "gf2^4_mult": {
+        "gates": 174,
+        "twoqubit": 93,
+        "single qubit": 81
+    },
+    "gf2^5_mult": {
+        "gates": 275,
+        "twoqubit": 147,
+        "single qubit": 128
+    },
+    "gf2^6_mult": {
+        "gates": 387,
+        "twoqubit": 208,
+        "single qubit": 179
+    },
+    "mod_mult_55": {
+        "gates": 87,
+        "twoqubit": 39,
+        "single qubit": 48
+    },
+    "mod5_4": {
+        "gates": 28,
+        "twoqubit": 13,
+        "single qubit": 15
+    },
+    "QFT8_before": {
+        "gates": 100,
+        "twoqubit": 42,
+        "single qubit": 58
+    },
+    "QFT16_before": {
+        "gates": 326,
+        "twoqubit": 155,
+        "single qubit": 171
+    },
+    "rc_adder_6": {
+        "gates": 171,
+        "twoqubit": 67,
+        "single qubit": 104
+    },
+    "tof_3": {
+        "gates": 35,
+        "twoqubit": 14,
+        "single qubit": 21
+    },
+    "tof_4": {
+        "gates": 62,
+        "twoqubit": 23,
+        "single qubit": 39
+    },
+    "tof_5": {
+        "gates": 81,
+        "twoqubit": 31,
+        "single qubit": 50
+    },
+    "tof_10": {
+        "gates": 183,
+        "twoqubit": 78,
+        "single qubit": 105
+    },
+    "vbe_adder_3": {
+        "gates": 82,
+        "twoqubit": 34,
+        "single qubit": 48
+    },
+    "grover_5": {
+        "gates": 508,
+        "twoqubit": 217,
+        "single qubit": 291
+    },
+    "hwb6": {
+        "gates": 208,
+        "twoqubit": 91,
+        "single qubit": 117
+    },
+    "qft_4": {
+        "gates": 147,
+        "twoqubit": 35,
+        "single qubit": 112
+    },
+    "QFTAdd8": {
+        "gates": 289,
+        "twoqubit": 149,
+        "single qubit": 140
+    },
+    "mod_red_21": {
+        "gates": 189,
+        "twoqubit": 80,
+        "single qubit": 109
+    },
+    "qcla_adder_10": {
+        "gates": 398,
+        "twoqubit": 179,
+        "single qubit": 219
+    },
+    "qcla_com_7": {
+        "gates": 283,
+        "twoqubit": 125,
+        "single qubit": 158
+    },
+    "qcla_mod_7": {
+        "gates": 674,
+        "twoqubit": 297,
+        "single qubit": 377
+    },
+    "ham15-low": {
+        "gates": 341,
+        "twoqubit": 186,
+        "single qubit": 155
+    },
+    "gf2^7_mult": {
+        "gates": 519,
+        "twoqubit": 282,
+        "single qubit": 237
+    }
+}
