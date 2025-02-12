@@ -2,13 +2,16 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch_geometric.nn as geom_nn
-
+import os
 
 from torch.distributions.categorical import Categorical
 from torch_geometric.nn import Sequential as geo_Sequential
+from torch_geometric.nn.aggr import AttentionalAggregation
+
+os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
 
 class CategoricalMasked(Categorical):
-    def __init__(self, probs=None, logits=None, validate_args=None, masks=None, device="cpu"):
+    def __init__(self, probs=None, logits=None, validate_args=None, masks=None, device="cuda"):
         if masks is None:
             masks = []
         self.masks = masks
@@ -30,22 +33,25 @@ class AgentGNN(nn.Module):
         self,
         envs,
         device,
-        c_hidden=32,
-        c_hidden_v=32,
+        c_hidden=128,
+        c_hidden_v=128,
         **kwargs,
     ):
         super().__init__()
 
         self.device = device
-        self.obs_shape = envs.envs[0].shape
+        #obs_shape = envs.get_attr("shape")#3000
+        #self.obs_shape = obs_shape[0]
+        #qubits_list = envs.get_attr('qubits')#retrieve environemnt qubits
+        #self.qubits = qubits_list[0]
+        self.obs_shape = 3000
         self.bin_required = int(np.ceil(np.log2(self.obs_shape)))
-        self.qubits = envs.envs[0].qubits
 
-        c_in_p = 16
-        c_in_v = 11
-        edge_dim = 6
-        edge_dim_v = 3
-        self.global_attention_critic = geom_nn.GlobalAttention(
+        c_in_p = 17
+        c_in_v = 12
+        edge_dim = 7
+        edge_dim_v = 2
+        self.global_attention_critic = AttentionalAggregation(
             gate_nn=nn.Sequential(
                 nn.Linear(c_hidden, c_hidden),
                 nn.ReLU(),
@@ -138,7 +144,7 @@ class AgentGNN(nn.Module):
         aggregated = self.global_attention_critic(features, x.batch)
         return self.critic_ff(aggregated)
     
-    def get_action(self, x, device="cpu"):
+    def get_action(self, x, device="cuda"):
         policy_obs, _ = x
         logits = self.actor(policy_obs)
         
@@ -162,10 +168,12 @@ class AgentGNN(nn.Module):
 
         # Convert the list of samples back to a tensor
         action = categoricals.sample()
+        #action = torch.randint(low=0, high=probs.shape[0], size=(1,))
+        #action = torch.argmax(probs, dim=0)
         batch_id = torch.arange(x[0].num_graphs)
         action_id = act_ids[batch_id, action]
 
-        return action.T, action_id.T
+        return action.permute(*torch.arange(action.ndim - 1, -1, -1)), action_id.permute(*torch.arange(action_id.ndim - 1, -1, -1))
 
     def get_action_and_value(self, x, action=None, device="cpu", testing=False):
         
@@ -202,11 +210,12 @@ class AgentGNN(nn.Module):
             action_id = torch.tensor([0]).to(device)
             
         if testing:
-            return action.T, action_id.T
+            return action.permute(*torch.arange(action.ndim - 1, -1, -1)), action_id.permute(*torch.arange(action_id.ndim - 1, -1, -1))
         
         logprob = categoricals.log_prob(action)
         entropy = categoricals.entropy(device)
-        return action.T, logprob, entropy, values, torch.tensor(action_logits).to(device).reshape(-1, 1), action_id.T
+        return action.permute(*torch.arange(action.ndim - 1, -1, -1)), logprob, entropy, values, action_logits.clone().detach().to(device).reshape(-1, 1), action_id.permute(*torch.arange(action_id.ndim - 1, -1, -1))
+        
 
     def get_value(self, x):
         values = self.critic(x)
