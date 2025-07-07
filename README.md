@@ -2,7 +2,7 @@
 This repository contains the code used to produce the results of the publication [Reinforcement Learning Based Quantum Circuit Optimization via ZX-Calculus](https://arxiv.org/abs/2312.11597). 
 
 ## Results and data verification
-* The data to create the figures of the paper are inside the folder ```results/5x60_non_clifford```. The ```json``` data files where generate with ```agent_test.py```. The code used to generate the figures is in the file ```results.ipynb```.
+* The data to create the figures of the paper are inside the folder ```results/5x60_non_clifford```. The ```json``` data files were generated with ```agent_test.py```. The code used to generate the figures is in the file ```results.ipynb```.
 The code used to create Table 2 from the paper can be found in the file ```benchmark.py```.
 
 * The optimized circuits can be found in the ```rl-zx/results/circuits``` path:
